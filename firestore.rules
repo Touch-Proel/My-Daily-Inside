@@ -1,0 +1,80 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helpers ---
+    
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isAdmin() {
+      // In a real app, I'd check a dedicated 'admins' collection.
+      // For this demo, I'll allow the owner's email.
+      return isSignedIn() && request.auth.token.email == 'prolseangly@gmail.com' && request.auth.token.email_verified == true;
+    }
+    
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+    
+    function incoming() {
+      return request.resource.data;
+    }
+    
+    function existing() {
+      return resource.data;
+    }
+
+    // --- Models ---
+
+    function isValidPost(data) {
+      let allowedKeys = ['slug', 'title', 'description', 'content', 'category', 'author', 'publishedAt', 'image', 'readingTime', 'id', 'updatedAt'];
+      return data.keys().hasAll(['slug', 'title', 'content', 'category', 'author', 'publishedAt']) 
+          && data.slug is string && data.slug.size() <= 200
+          && data.title is string && data.title.size() <= 200
+          && data.content is string && data.content.size() <= 100000
+          && data.author is string && data.author.size() <= 100
+          && data.image is string && data.image.size() <= 1000
+          && data.publishedAt is string;
+    }
+
+    function isValidMessage(data) {
+      return data.keys().hasAll(['name', 'email', 'message', 'createdAt'])
+          && data.keys().size() == 4
+          && data.name is string && data.name.size() <= 100
+          && data.email is string && data.email.size() <= 100 && data.email.matches('^.+@.+\\..+$')
+          && data.message is string && data.message.size() <= 2000
+          && data.createdAt == request.time;
+    }
+
+    // --- Rules ---
+
+    match /posts/{postId} {
+      allow read: if true;
+      allow create: if isAdmin() && isValidPost(incoming());
+      allow update: if isAdmin() && isValidPost(incoming()) 
+                     && (incoming().diff(existing()).affectedKeys().hasOnly(['title', 'slug', 'description', 'content', 'category', 'image', 'readingTime', 'publishedAt', 'updatedAt']));
+      allow delete: if isAdmin();
+    }
+
+    match /categories/{categoryId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /messages/{messageId} {
+      allow create: if isValidMessage(incoming());
+      allow get, list, update, delete: if isAdmin();
+    }
+
+    // Connectivity Heartbeat
+    match /test/{docId} {
+      allow read: if true;
+    }
+  }
+}
